@@ -1,211 +1,147 @@
-# 🏠 AI-Based Minimalist Interior Redesign System
+# 🏠 AI Interior Redesign Studio (YOLO + SAM + SDXL Inpainting)
 
-This project is a hybrid AI system that redesigns interior room images into a **minimalist style** using computer vision and diffusion-based deep learning.
+An interactive, terminal-based tool that redesigns interior room photos. It detects
+furniture with a **custom-trained YOLO11 model**, segments it precisely with **SAM**,
+and edits it with a **pretrained SDXL inpainting pipeline** — driven entirely from a
+rich-text menu in your terminal.
 
-⚠️ **Important:**
-This project is currently **under development** and **NOT a finished version**.
-Several components (frontend, optimization, advanced inpainting, etc.) are still incomplete.
-
----
-
-## 🚀 Project Overview
-
-The system takes a room image and generates a **minimalist redesign** by:
-
-* Detecting objects in the room (YOLO11)
-* Segmenting objects precisely (SAM)
-* Removing clutter (inpainting)
-* Applying a **custom-trained diffusion model** for redesign
+⚠️ This is the part I worked on the project it is not the whole project.
 
 ---
 
-## 🧠 Technologies Used
+## ✍️ What I actually built
 
-* **Python**
-* **YOLO** → Object Detection
-* **SAM (Segment Anything Model)** → Image Segmentation
-* **Stable Diffusion (custom training)** → Redesign
-* **PyTorch + Diffusers** → Model training/inference
-* **OpenCV** → Image processing
+The part of this project that's my own trained model is the **YOLO11 object
+detector** (`scripts/prepare_dataset.py` + `scripts/train.py`). Everything
+downstream of detection — SAM segmentation and SDXL inpainting — uses other
+people's pretrained weights as-is, called through prompt/mask engineering I wrote,
+but not trained by me.
+
+**To reproduce or extend the detector, you need this kind of dataset:**
+
+- Photos of room interiors (any room type you want to detect furniture in)
+- Each photo labeled in **YOLO format** using a tool like **LabelImg** — one `.txt`
+  per image, with bounding boxes for each object class you care about (sofa, chair,
+  table, carpet, curtain, lamp, pillow, etc. — see `Config.APPLIANCE_KEYWORDS` in
+  `inpaint_pipeline.py` for the full class list this project expects)
+- Images and their matching label files placed in `dataset/images/` and
+  `dataset/labels/` respectively, with matching filenames (`room1.jpg` ↔
+  `room1.txt`)
+- Ideally a few hundred+ labeled images per class for a decent detector; more is
+  better
+
+**Given that dataset, here's what the code does with it:**
+
+1. `scripts/prepare_dataset.py` checks every image has a matching label file, then
+   splits everything 80/20 into `train/` and `val/` subfolders automatically.
+2. `scripts/train.py` fine-tunes a YOLO11m model on that split (either from your own
+   existing `best.pt` or from COCO pretrained weights), with augmentation, AdamW,
+   and early stopping already configured, and reports mAP50 / mAP50-95 when done.
+3. The resulting `best.pt` is what `inpaint_pipeline.py` loads to detect furniture in
+   new room photos, which SAM then turns into precise masks for SDXL to edit.
+
+So: **you supply the labeled room-photo dataset, the code trains the detector and
+plugs it straight into the existing SAM + SDXL editing pipeline.**
 
 ---
 
-## ⚙️ System Pipeline
+## 🚀 What it does
+
+You give it one room photo. It first runs an automatic "initial redesign" pass
+(declutter, and optionally restyle), then drops you into an interactive loop where
+you can keep editing:
+
+- **Modify a single object** — recolor it, change its material, or restyle it, while
+  keeping (or intentionally changing) its shape
+- **Global change** — redesign the whole room while locking structural elements
+  (walls, windows, doors, ceiling) so the room's architecture doesn't shift
+- Every iteration is saved as its own image, with a mask preview and a session
+  report so you can see exactly what changed and when
+
+---
+
+## 🧠 Technologies used
+
+| Stage | Tool | Trained by you? |
+|---|---|---|
+| Object detection | **YOLO11** (Ultralytics) | ✅ Yes — `train.py` fine-tunes this on your own labeled photos |
+| Segmentation | **SAM** (`vit_b`, Meta's Segment Anything) | ❌ No — pretrained checkpoint, used as-is |
+| Image editing | **SDXL Inpainting 1.0** + **SDXL Refiner 1.0** (via 🤗 Diffusers) | ❌ No — pretrained, off-the-shelf, used as-is |
+
+Other libraries: PyTorch, OpenCV, `rich` (terminal UI), `segment-anything`, `transformers`.
+
+---
+
+## ⚙️ System pipeline
 
 ```
-Input Image
+Room photo
    ↓
-YOLO11 → Object detection
+YOLO11 (best.pt, your fine-tuned weights) → detects furniture/decor
    ↓
-SAM → Precise segmentation masks
+SAM (vit_b, pretrained) → precise per-object segmentation masks
    ↓
-Custom Diffusion Model → Minimalist redesign
+SDXL Inpainting + Refiner (pretrained, prompt-driven) → recolor / restyle / remove / redesign
    ↓
-Output Image
+Saved iteration image + mask preview + session report
 ```
 
 ---
+## ▶️ How to run
 
-## 📁 Project Structure
-
-```
-project/
-│
-├── main.py
-├── diffusion/
-│
-├── yolo/
-├── sam/
-│
-├── beforeandafter_examples/   # Extracted dataset
-├── beforeandafter.zip         # Dataset archive
-│
-├── latent_proj.pt
-├── unet_attn.pt
-│
-└──
-```
-
----
-
-## 📊 Required Data
-
-### 1️⃣ Diffusion Training Dataset (REQUIRED)
-
-You must provide paired images in the following format:
-
-```
-beforeandafter_examples/
-   before images/
-       room1_before.jpg
-       room2_before.jpg
-
-   after images/
-       room1_after.jpg
-       room2_after.jpg
-```
-
-### ⚠️ Naming is VERY IMPORTANT:
-
-* `room1_before.jpg` → `room1_after.jpg`
-* Must match exactly
-
-### Dataset Notes:
-
-* Same room, same angle
-* Only style/layout should change
-* Recommended: 100+ image pairs
-
----
-
-### 2️⃣ YOLO Dataset (OPTIONAL)
-
-Only required if you want to train YOLO yourself:
-
-```
-image.jpg
-image.txt  # YOLO format
-```
-
-Otherwise:
-👉 Pretrained YOLO is enough
-
----
-
-## 🧪 Diffusion Model (Your Implementation)
-
-This project uses a **custom-trained Stable Diffusion pipeline** with:
-
-### ✔ Latent conditioning (before → after)
-
-* Uses encoded "before" image as conditioning input
-* Not standard img2img — more advanced
-
-### ✔ Fine-tuned UNet attention layers
-
-* Only attention layers are trained
-* Efficient and GPU-friendly
-
-### ✔ Custom latent projection network
-
-* Maps image latents → conditioning embeddings
-
-### ✔ SNR-weighted loss
-
-* Improves training stability
-
----
-
-## ▶️ How to Run
-
-### 1️⃣ Extract dataset
+### 1️⃣ Prepare your dataset
 
 ```bash
-python diffusion_train.py
+python prepare_dataset.py
 ```
 
-(or call `unzip_diffusion()` manually)
+Checks that every image in `dataset/images/` has a matching LabelImg YOLO-format
+label in `dataset/labels/`, then splits everything 80/20 into `train/` and `val/`
+subfolders under each.
 
----
-
-### 2️⃣ Train diffusion model
+### 2️⃣ Train (or fine-tune) the YOLO detector
 
 ```bash
-python diffusion_train.py
+python yolo_train.py
 ```
 
-This will generate:
+Fine-tunes `yolo11m` from your existing `models/best.pt` (or from COCO pretrained
+weights, see the commented option in the script) on `dataset/data.yaml`, then
+validates and reports mAP50 / mAP50-95. 
 
-* `latent_proj.pt`
-* `unet_attn.pt`
-* best checkpoints
+### 3️⃣ Run an interactive redesign session
 
----
+```bash
+python inpaint_pipeline.py
+```
 
-## ⚠️ Limitations (Current Version)
+You'll be asked for an image path, then for an initial style
+(`low` / `balanced` / `creative`):
 
-* Dataset is small (~78–100 images)
-* No frontend yet
-* Inpainting is basic
-* Model sometimes alters room structure
-* Requires strong GPU (recommended RTX series)
+- **low** — declutter only (removes wall art, extra pillows, etc.); furniture color
+  and shape are untouched
+- **balanced** / **creative** — declutter *and* restyle the room, with structural
+  elements locked
 
----
+After that, you get a menu each iteration:
+[1] Modify an object   — recolor / re-material / reshape one detected item
+[2] Global change      — redesign the whole room (furniture-only or full mask)
+[3] Exit
 
-## 🔮 Future Improvements
-
-* Improve dataset size and diversity
-* Add ControlNet for better structure preservation
-* Add web interface (Flask / React)
-* Improve inference speed
-* Add furniture recommendation system
+Every change is saved along with a mask preview and an
+entry in the session report.
 
 ---
 
 ## 📌 Notes
 
-* GPU is strongly recommended (RTX 30/40 series ideal)
-* Training uses **mixed precision (fp16)**
-* Large models may require high VRAM (8GB+)
+- GPU strongly recommended (RTX 30/40 series ideal); the pipeline runs on CPU as a
+  fallback but is very slow
+- SDXL runs in fp16 on GPU with model CPU offload and VAE tiling to reduce VRAM use
+- YOLO training defaults to automatic batch sizing (`batch=-1`) and mixed precision
 
 ---
 
-## 📷 Output Example
-
-(Currently shows side-by-side comparison)
-
-```
-[Before Image | Generated Minimalist Image]
-```
-
----
-
-## 🤝 Contribution
-
-This is an academic project under development.
-Contributions and suggestions are welcome.
-
----
 
 ## 📄 License
 
