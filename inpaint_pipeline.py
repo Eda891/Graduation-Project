@@ -8,16 +8,11 @@ import warnings
 import numpy as np
 from pathlib import Path
 from PIL import Image, ImageFilter
-
-
-
-
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
-
 import transformers
 from diffusers.utils import logging as diffusers_logging
 
